@@ -42,8 +42,8 @@ def exelog(stmt):
         f.close()
 
 def evaluate(expr):
-    result = lldb.debugger.GetSelectedTarget().EvaluateExpression(expr, lldb.SBExpressionOptions())
-    log(lambda : "{} => {}".format(expr, result))
+    result = lldb.debugger.GetSelectedTarget().EvaluateExpression(expr)
+    log(lambda : "evaluate: {} => {}".format(expr, result))
     return result
 
 def _symbol_loaded_address(name, debugger = lldb.debugger):
@@ -70,11 +70,12 @@ def is_instance_of(addr, typeinfo):
     return evaluate("(bool)IsInstance({:#x}, {:#x})".format(addr, typeinfo)).GetValue() == "true"
 
 def is_string_or_array(value):
-    return evaluate("(int)IsInstance({0:#x}, {1:#x}) ? 1 : ((int)Konan_DebugIsArray({0:#x})) ? 2 : 0)".format(value.unsigned, _symbol_loaded_address('kclass:kotlin.String'))).unsigned
+    return evaluate("is_string_or_array:{0:#x} (int)IsInstance({0:#x}, {1:#x}) ? 1 : ((int)Konan_DebugIsArray({0:#x})) ? 2 : 0)".format(value.unsigned, _symbol_loaded_address('kclass:kotlin.String'))).unsigned
 
 def type_info(value):
     """This method checks self-referencing of pointer of first member of TypeInfo including case when object has an
     meta-object pointed by TypeInfo. Two lower bits are reserved for memory management needs see runtime/src/main/cpp/Memory.h."""
+    log(lambda: "type_info({:#x}: {})".format(value.unsigned, value.GetTypeName()))
     if value.GetTypeName() != "ObjHeader *":
         return None
     expr = "*(void **)((uintptr_t)(*(void**){0:#x}) & ~0x3) == **(void***)((uintptr_t)(*(void**){0:#x}) & ~0x3) ? *(void **)((uintptr_t)(*(void**){0:#x}) & ~0x3) : (void *)0".format(value.unsigned)
@@ -465,6 +466,7 @@ def konan_globals_command(debugger, command, result, internal_dict):
        result.AppendMessage('{} {}: {}'.format(type, name, str_value))
 
 def __lldb_init_module(debugger, _):
+    log(lambda: "init start")
     __FACTORY['object'] = lambda x, y, z: KonanObjectSyntheticProvider(x, y, z)
     __FACTORY['array'] = lambda x, y, z: KonanArraySyntheticProvider(x, z)
     __FACTORY['string'] = lambda x, y, _: KonanStringSyntheticProvider(x)
@@ -487,4 +489,4 @@ def __lldb_init_module(debugger, _):
     debugger.HandleCommand('command script add -f {}.type_name_command type_name'.format(__name__))
     debugger.HandleCommand('command script add -f {}.type_by_address_command type_by_address'.format(__name__))
     debugger.HandleCommand('command script add -f {}.symbol_by_name_command symbol_by_name'.format(__name__))
-
+    log(lambda: "init end")
