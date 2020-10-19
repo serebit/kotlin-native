@@ -32,16 +32,18 @@ import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameUnsafe
 import org.jetbrains.kotlin.resolve.descriptorUtil.getAllSuperClassifiers
 import org.jetbrains.kotlin.types.Variance
 
-internal class KTypeGenerator(val context: KonanBackendContext, val irFile: IrFile, val irElement: IrElement) {
+internal class KTypeGenerator(
+        val context: KonanBackendContext,
+        val irFile: IrFile,
+        val irElement: IrElement,
+        val needExactTypeParameters: Boolean = false
+) {
     private val symbols = context.ir.symbols
 
-    fun IrBuilderWithScope.irKType(type: IrType,
-                                   needExactTypeParameters: Boolean = false,
-                                   leaveReifiedForLater: Boolean = false
-    ) = irKType(type, BuildingContext(needExactTypeParameters, leaveReifiedForLater, mutableSetOf()))
+    fun IrBuilderWithScope.irKType(type: IrType, leaveReifiedForLater: Boolean = false) =
+            irKType(type, BuildingContext(leaveReifiedForLater, mutableSetOf()))
 
-    private class BuildingContext(val needExactTypeParameters: Boolean, var leaveReifiedForLater: Boolean,
-                                  val seenTypeParameters: MutableSet<IrTypeParameter>)
+    private class BuildingContext(var leaveReifiedForLater: Boolean, val seenTypeParameters: MutableSet<IrTypeParameter>)
 
     private class RecursiveBoundsException(message: String) : Throwable(message)
 
@@ -77,7 +79,7 @@ internal class KTypeGenerator(val context: KonanBackendContext, val irFile: IrFi
                     context = context
             )
         } catch (t: RecursiveBoundsException) {
-            if (context.needExactTypeParameters)
+            if (needExactTypeParameters)
                 this@KTypeGenerator.context.reportCompilationError(t.message!!, irFile, irElement)
             return irCall(symbols.kTypeImplForTypeParametersWithRecursiveBounds.constructors.single())
         }
@@ -119,7 +121,9 @@ internal class KTypeGenerator(val context: KonanBackendContext, val irFile: IrFi
             IrGetEnumValueImpl(
                     startOffset, endOffset,
                     symbols.kVariance.defaultType,
-                    symbols.kVariance.owner.declarations.filterIsInstance<IrEnumEntry>()[variance.ordinal].symbol
+                    symbols.kVariance.owner.declarations
+                            .filterIsInstance<IrEnumEntry>()
+                            .single { it.name.asString() == variance.name }.symbol
             )
 
     private fun <T> IrBuilderWithScope.irKTypeLikeList(

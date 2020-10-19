@@ -60,8 +60,8 @@ internal class PreInlineLowering(val context: Context) : BodyLoweringPass {
                     Symbols.isTypeOfIntrinsic(expression.symbol) -> {
                         val type = expression.getTypeArgument(0)
                                 ?: error(container.file, expression, "missing type argument")
-                        with (KTypeGenerator(context, container.file, expression)) {
-                            data.at(expression).irKType(type, needExactTypeParameters = true, leaveReifiedForLater = true)
+                        with (KTypeGenerator(context, container.file, expression, needExactTypeParameters = true)) {
+                            data.at(expression).irKType(type, leaveReifiedForLater = true)
                         }
                     }
                     else -> expression
