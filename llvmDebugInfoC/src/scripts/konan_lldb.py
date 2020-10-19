@@ -70,7 +70,9 @@ def is_instance_of(addr, typeinfo):
     return evaluate("(bool)IsInstance({:#x}, {:#x})".format(addr, typeinfo)).GetValue() == "true"
 
 def is_string_or_array(value):
-    return evaluate("is_string_or_array:{0:#x} (int)IsInstance({0:#x}, {1:#x}) ? 1 : ((int)Konan_DebugIsArray({0:#x})) ? 2 : 0)".format(value.unsigned, _symbol_loaded_address('kclass:kotlin.String'))).unsigned
+    soa = evaluate("(int)IsInstance({0:#x}, {1:#x}) ? 1 : ((int)Konan_DebugIsArray({0:#x})) ? 2 : 0)".format(value.unsigned, _symbol_loaded_address('kclass:kotlin.String'))).unsigned
+    log(lambda: "is_string_or_array:{:#x}:{}".format(value.unsigned, soa))
+    return soa
 
 def type_info(value):
     """This method checks self-referencing of pointer of first member of TypeInfo including case when object has an
@@ -94,7 +96,7 @@ ARRAY_TO_STRING_LIMIT = 10
 
 def kotlin_object_type_summary(lldb_val, internal_dict = {}):
     """Hook that is run by lldb to display a Kotlin object."""
-    log(lambda: "kotlin_object_type_summary({:#x}: {})".format(lldb_val.unsigned, lldb_val.GetTypeName()))
+    log(lambda: f"kotlin_object_type_summary({lldb_val.unsigned:#x}: {lldb_val.GetTypeName()})")
     fallback = lldb_val.GetValue()
     if lldb_val.GetTypeName() != "ObjHeader *":
         if lldb_val.GetValue() is None:
@@ -128,7 +130,9 @@ class KonanHelperProvider(lldb.SBSyntheticValueProvider):
         self._internal_dict = internal_dict.copy()
         self._to_string_depth = TO_STRING_DEPTH if "to_string_depth" not in self._internal_dict.keys() else  self._internal_dict["to_string_depth"]
         if self._children_count == 0:
-            self._children_count = evaluate("(int)Konan_DebugGetFieldCount({:#x})".format(self._valobj.unsigned)).signed
+            children_count = evaluate("(int)Konan_DebugGetFieldCount({:#x})".format(self._valobj.unsigned)).signed
+            log(lambda: "(int)[{}].Konan_DebugGetFieldCount({:#x}) = {}".format(self._valobj.name, self._valobj.unsigned, children_count))
+            self._children_count = children_count
         self._children = []
         self._type_conversion = [
             lambda address, name: self._valobj.CreateValueFromExpression(name, "(void *){:#x}".format(address)),
@@ -167,6 +171,7 @@ class KonanHelperProvider(lldb.SBSyntheticValueProvider):
 
     def _create_synthetic_child(self, address, name):
         index = self.get_child_index(name)
+        log(lambda: "_create_synthetic_child({:#x}, {:#x}, {}):_to_string_depth:{}".format(self._valobj.unsigned, address, name, self._to_string_depth))
         if self._to_string_depth == 0:
            return None
         log(lambda: "_create_synthetic_child: [index:{}, {}: {:#x} value:{:#x}]".format(index, name, address, evaluate("*(void**){:#x}".format(address)).unsigned))
@@ -319,6 +324,7 @@ class KonanObjectSyntheticProvider(KonanHelperProvider):
 
     # TODO: fix cyclic structures stringification.
     def to_string(self):
+        log(lambda:"to_string: {:#x}: _to_string_depth:{}".fromat(self._valobj.unsigned, self._to_string_depth))
         if self._to_string_depth == 0:
             return "..."
         else:
