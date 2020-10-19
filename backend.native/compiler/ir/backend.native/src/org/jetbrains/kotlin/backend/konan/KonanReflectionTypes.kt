@@ -58,4 +58,6 @@ class KonanReflectionTypes(module: ModuleDescriptor, internalPackage: FqName) {
     val kMutableProperty2Impl: ClassDescriptor by ClassLookup(internalScope)
     val kLocalDelegatedPropertyImpl: ClassDescriptor by ClassLookup(internalScope)
     val kLocalDelegatedMutablePropertyImpl: ClassDescriptor by ClassLookup(internalScope)
+
+    val typeOf = kotlinReflectScope.getContributedFunctions(Name.identifier("typeOf"), NoLookupLocation.FROM_REFLECTION).single()
 }

@@ -95,7 +95,7 @@ internal class PostInlineLowering(val context: Context) : FileLoweringPass {
                     val type = expression.getTypeArgument(0)
                             ?: org.jetbrains.kotlin.backend.konan.error(irFile, expression, "missing type argument")
                     return with (KTypeGenerator(context, irFile, expression)) {
-                        builder.at(expression).irKType(type, needExactTypeParameters = true)
+                        builder.at(expression).irKType(type, needExactTypeParameters = true, leaveReifiedForLater = false)
                     }
                 }
 

@@ -6,20 +6,28 @@
 package org.jetbrains.kotlin.backend.konan.lower
 
 import org.jetbrains.kotlin.backend.common.BodyLoweringPass
+import org.jetbrains.kotlin.backend.common.ir.Symbols
+import org.jetbrains.kotlin.backend.common.lower.at
+import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.backend.konan.Context
 import org.jetbrains.kotlin.backend.konan.KonanConfigKeys
+import org.jetbrains.kotlin.backend.konan.error
+import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
 import org.jetbrains.kotlin.ir.declarations.IrDeclaration
+import org.jetbrains.kotlin.ir.declarations.IrDeclarationBase
+import org.jetbrains.kotlin.ir.declarations.IrSymbolOwner
 import org.jetbrains.kotlin.ir.expressions.IrBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.impl.IrCompositeImpl
 import org.jetbrains.kotlin.ir.types.isUnit
-import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
-import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
+import org.jetbrains.kotlin.ir.util.file
+import org.jetbrains.kotlin.ir.visitors.IrElementTransformer
 
 /**
  * This pass runs before inlining and performs the following additional transformations over some operations:
  *     - Assertion call removal.
+ *     - First phase of typeOf intrinsic lowering.
  */
 internal class PreInlineLowering(val context: Context) : BodyLoweringPass {
 
@@ -29,19 +37,36 @@ internal class PreInlineLowering(val context: Context) : BodyLoweringPass {
     private val enableAssertions = context.config.configuration.getBoolean(KonanConfigKeys.ENABLE_ASSERTIONS)
 
     override fun lower(irBody: IrBody, container: IrDeclaration) {
-        irBody.transformChildrenVoid(object : IrElementTransformerVoid() {
+        var symbolOwner = container
+        while (symbolOwner !is IrSymbolOwner)
+            symbolOwner = symbolOwner.parent as IrDeclaration
 
-            override fun visitCall(expression: IrCall): IrExpression {
-                expression.transformChildrenVoid(this)
+        irBody.transformChildren(object : IrElementTransformer<IrBuilderWithScope> {
+            override fun visitDeclaration(declaration: IrDeclarationBase, data: IrBuilderWithScope) =
+                    super.visitDeclaration(declaration,
+                            data = (declaration as? IrSymbolOwner)?.let { context.createIrBuilder(it.symbol, it.startOffset, it.endOffset) }
+                                    ?: data
+                    )
 
-                // Replace assert() call with an empty composite if assertions are not enabled.
-                if (!enableAssertions && expression.symbol in asserts) {
-                    assert(expression.type.isUnit())
-                    return IrCompositeImpl(expression.startOffset, expression.endOffset, expression.type)
+            override fun visitCall(expression: IrCall, data: IrBuilderWithScope): IrExpression {
+                expression.transformChildren(this, data)
+
+                return when {
+                    !enableAssertions && expression.symbol in asserts -> {
+                        // Replace assert() call with an empty composite if assertions are not enabled.
+                        require(expression.type.isUnit())
+                        IrCompositeImpl(expression.startOffset, expression.endOffset, expression.type)
+                    }
+                    Symbols.isTypeOfIntrinsic(expression.symbol) -> {
+                        val type = expression.getTypeArgument(0)
+                                ?: error(container.file, expression, "missing type argument")
+                        with (KTypeGenerator(context, container.file, expression)) {
+                            data.at(expression).irKType(type, needExactTypeParameters = true, leaveReifiedForLater = true)
+                        }
+                    }
+                    else -> expression
                 }
-
-                return expression
             }
-        })
+        }, data = context.createIrBuilder(symbolOwner.symbol, irBody.startOffset, irBody.endOffset))
     }
 }

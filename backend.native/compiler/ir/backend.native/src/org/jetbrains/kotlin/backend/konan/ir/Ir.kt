@@ -445,6 +445,8 @@ internal class KonanSymbols(
     val kLocalDelegatedPropertyImpl = symbolTable.referenceClass(context.reflectionTypes.kLocalDelegatedPropertyImpl)
     val kLocalDelegatedMutablePropertyImpl = symbolTable.referenceClass(context.reflectionTypes.kLocalDelegatedMutablePropertyImpl)
 
+    val typeOf = symbolTable.referenceSimpleFunction(context.reflectionTypes.typeOf)
+
     val kType = symbolTable.referenceClass(context.reflectionTypes.kType)
     val kVariance = symbolTable.referenceClass(context.reflectionTypes.kVariance)
 
