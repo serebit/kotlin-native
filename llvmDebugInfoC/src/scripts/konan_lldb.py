@@ -29,6 +29,7 @@ import os
 import time
 
 NULL = 'null'
+_CACHE = {}
 
 def log(msg):
     if False:
@@ -122,16 +123,29 @@ def kotlin_object_type_summary(lldb_val, internal_dict = {}):
         bench(start, lambda: "kotlin_object_type_summary:({0:#x}) = falback:{0:#x}".format(lldb_val.unsigned))
         return fallback
 
-    value = select_provider(lldb_val, tip, internal_dict)
+    value = select_provider_cached(lldb_val, tip, internal_dict)
     bench(start, lambda: "kotlin_object_type_summary:({:#x}) = value:{:#x}".format(lldb_val.unsigned, value._valobj.unsigned))
     start = time.monotonic()
     str0 = str(value.to_string())
     bench(start, lambda: "kotlin_object_type_summary:({:#x}) = str:'{}...'".format(lldb_val.unsigned, str0[:3]))
     return str0
 
+def select_provider_cached(lldb_val, tip, internal_dict):
+    start = time.monotonic()
+    log(lambda : "select_provider_cached: {:#x} name:{} tip:{:#x}".format(lldb_val.unsigned, lldb_val.name, tip))
+    
+    ret = _CACHE["f{lldb_val.unsigned:#x}"] if "f{lldb_val.unsigned:#x}" in _CACHE.keys() else select_provider(lldb_val, tip, internal_dict)
+    bench(start, lambda: "select_provider_cached({:#x})".format(lldb_val.unsigned))
+    return ret
+
 def select_provider(lldb_val, tip, internal_dict):
     start = time.monotonic()
     log(lambda : "select_provider: {:#x} name:{} tip:{:#x}".format(lldb_val.unsigned, lldb_val.name, tip))
+    if "{lldb_val.unsigned:#x}" in _CACHE.keys():
+        ret = _CACHE["{lldb_val.unsigned:#x}"]
+        bench(start, lambda: "select_provider({:#x}) ff".format(lldb_val.unsigned))
+        return ret
+
     soa = is_string_or_array(lldb_val)
     log(lambda : "select_provider: {:#x} : soa: {}".format(lldb_val.unsigned, soa))
     ret =   __FACTORY['string'](lldb_val, tip, internal_dict) if soa == 1 else __FACTORY['array'](lldb_val, tip, internal_dict) if soa == 2 \
@@ -144,9 +158,10 @@ class KonanHelperProvider(lldb.SBSyntheticValueProvider):
         self._target = lldb.debugger.GetSelectedTarget()
         self._process = self._target.GetProcess()
         self._valobj = valobj
+        self._internal_dict = internal_dict.copy()
+        _CACHE[f"{valobj.unsigned:#x}"] = self
         if amString:
             return
-        self._internal_dict = internal_dict.copy()
         self._to_string_depth = TO_STRING_DEPTH if "to_string_depth" not in self._internal_dict.keys() else  self._internal_dict["to_string_depth"]
         if self._children_count == 0:
             children_count = evaluate("(int)Konan_DebugGetFieldCount({:#x})".format(self._valobj.unsigned)).signed
@@ -390,7 +405,6 @@ class KonanArraySyntheticProvider(KonanHelperProvider):
     def to_string(self):
         internal_dict = self._internal_dict.copy()
         internal_dict["to_string_depth"] = self._to_string_depth - 1
-        del internal_dict['provider']
         return [self._deref_or_obj_summary(i, internal_dict) for i in range(min(ARRAY_TO_STRING_LIMIT, self._children_count))]
 
 
@@ -403,7 +417,7 @@ class KonanProxyTypeProvider:
         if not tip:
             return
         log(lambda : "KonanProxyTypeProvider:{:#x} tip: {:#x}".format(valobj.unsigned, tip))
-        self._proxy = select_provider(valobj, tip, internal_dict)
+        self._proxy = select_provider_cached(valobj, tip, internal_dict)
         bench(start, lambda: "KonanProxyTypeProvider({:#x})".format(valobj.unsigned))
         log(lambda: "KonanProxyTypeProvider:{:#x} _proxy: {}".format(valobj.unsigned, self._proxy.__class__.__name__))
         self.update()
@@ -508,7 +522,7 @@ def __lldb_init_module(debugger, _):
     ')
     debugger.HandleCommand('\
         type synthetic add \
-        --python-class konan_lldb.KonanProxyTypeProvider\
+        --python-input konan_lldb.select_provider_cached \
         "ObjHeader *" \
         --category Kotlin\
     ')
