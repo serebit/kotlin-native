@@ -37,10 +37,6 @@ internal class PreInlineLowering(val context: Context) : BodyLoweringPass {
     private val enableAssertions = context.config.configuration.getBoolean(KonanConfigKeys.ENABLE_ASSERTIONS)
 
     override fun lower(irBody: IrBody, container: IrDeclaration) {
-        var symbolOwner = container
-        while (symbolOwner !is IrSymbolOwner)
-            symbolOwner = symbolOwner.parent as IrDeclaration
-
         irBody.transformChildren(object : IrElementTransformer<IrBuilderWithScope> {
             override fun visitDeclaration(declaration: IrDeclarationBase, data: IrBuilderWithScope) =
                     super.visitDeclaration(declaration,
@@ -67,6 +63,6 @@ internal class PreInlineLowering(val context: Context) : BodyLoweringPass {
                     else -> expression
                 }
             }
-        }, data = context.createIrBuilder(symbolOwner.symbol, irBody.startOffset, irBody.endOffset))
+        }, data = context.createIrBuilder((container as IrSymbolOwner).symbol, irBody.startOffset, irBody.endOffset))
     }
 }
