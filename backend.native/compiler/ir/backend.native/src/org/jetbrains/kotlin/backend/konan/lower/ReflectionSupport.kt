@@ -67,7 +67,9 @@ internal class KTypeGenerator(
                     }
 
                     context.leaveReifiedForLater = false
-                    irKTypeParameter(classifier.owner, context)
+                    irKTypeParameter(classifier.owner, context).also {
+                        context.leaveReifiedForLater = true
+                    }
                 }
                 else -> TODO("Unexpected classifier: $classifier")
             }
