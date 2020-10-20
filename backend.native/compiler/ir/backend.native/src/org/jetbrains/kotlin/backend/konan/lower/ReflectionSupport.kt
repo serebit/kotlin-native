@@ -41,35 +41,35 @@ internal class KTypeGenerator(
     private val symbols = context.ir.symbols
 
     fun IrBuilderWithScope.irKType(type: IrType, leaveReifiedForLater: Boolean = false) =
-            irKType(type, BuildingContext(leaveReifiedForLater, mutableSetOf()))
-
-    private class BuildingContext(var leaveReifiedForLater: Boolean, val seenTypeParameters: MutableSet<IrTypeParameter>)
+            irKType(type, leaveReifiedForLater, mutableSetOf())
 
     private class RecursiveBoundsException(message: String) : Throwable(message)
 
-    private fun IrBuilderWithScope.irKType(type: IrType, context: BuildingContext): IrExpression {
+    private fun IrBuilderWithScope.irKType(
+            type: IrType,
+            leaveReifiedForLater: Boolean,
+            seenTypeParameters: MutableSet<IrTypeParameter>
+    ): IrExpression {
         if (type !is IrSimpleType) {
             // Represent as non-denotable type:
             return irKTypeImpl(
                     kClassifier = irNull(),
                     irTypeArguments = emptyList(),
                     isMarkedNullable = false,
-                    context = context
+                    leaveReifiedForLater = leaveReifiedForLater,
+                    seenTypeParameters = seenTypeParameters
             )
         }
         try {
             val kClassifier = when (val classifier = type.classifier) {
                 is IrClassSymbol -> irKClass(classifier)
                 is IrTypeParameterSymbol -> {
-                    if (classifier.owner.isReified && context.leaveReifiedForLater) {
+                    if (classifier.owner.isReified && leaveReifiedForLater) {
                         // Leave as is for reification.
                         return irCall(symbols.typeOf).apply { putTypeArgument(0, type) }
                     }
 
-                    context.leaveReifiedForLater = false
-                    irKTypeParameter(classifier.owner, context).also {
-                        context.leaveReifiedForLater = true
-                    }
+                    irKTypeParameter(classifier.owner, leaveReifiedForLater = false, seenTypeParameters = seenTypeParameters)
                 }
                 else -> TODO("Unexpected classifier: $classifier")
             }
@@ -78,7 +78,8 @@ internal class KTypeGenerator(
                     kClassifier = kClassifier,
                     irTypeArguments = type.arguments,
                     isMarkedNullable = type.hasQuestionMark,
-                    context = context
+                    leaveReifiedForLater = leaveReifiedForLater,
+                    seenTypeParameters = seenTypeParameters
             )
         } catch (t: RecursiveBoundsException) {
             if (needExactTypeParameters)
@@ -91,26 +92,31 @@ internal class KTypeGenerator(
             kClassifier: IrExpression,
             irTypeArguments: List<IrTypeArgument>,
             isMarkedNullable: Boolean,
-            context: BuildingContext
+            leaveReifiedForLater: Boolean,
+            seenTypeParameters: MutableSet<IrTypeParameter>
     ): IrExpression = irCall(symbols.kTypeImpl.constructors.single()).apply {
         putValueArgument(0, kClassifier)
-        putValueArgument(1, irKTypeProjectionsList(irTypeArguments, context))
+        putValueArgument(1, irKTypeProjectionsList(irTypeArguments, leaveReifiedForLater, seenTypeParameters))
         putValueArgument(2, irBoolean(isMarkedNullable))
     }
 
     private fun IrBuilderWithScope.irKClass(symbol: IrClassSymbol) = irKClass(this@KTypeGenerator.context, symbol)
 
-    private fun IrBuilderWithScope.irKTypeParameter(typeParameter: IrTypeParameter, context: BuildingContext): IrMemberAccessExpression<*> {
-        if (!context.seenTypeParameters.add(typeParameter))
+    private fun IrBuilderWithScope.irKTypeParameter(
+            typeParameter: IrTypeParameter,
+            leaveReifiedForLater: Boolean,
+            seenTypeParameters: MutableSet<IrTypeParameter>
+    ): IrMemberAccessExpression<*> {
+        if (!seenTypeParameters.add(typeParameter))
             throw RecursiveBoundsException("Non-reified type parameters with recursive bounds are not supported yet: ${typeParameter.render()}")
         val result = irCall(symbols.kTypeParameterImpl.constructors.single()).apply {
             putValueArgument(0, irString(typeParameter.name.asString()))
             putValueArgument(1, irString(typeParameter.parentUniqueName))
-            putValueArgument(2, irKTypeList(typeParameter.superTypes, context))
+            putValueArgument(2, irKTypeList(typeParameter.superTypes, leaveReifiedForLater, seenTypeParameters))
             putValueArgument(3, irKVariance(typeParameter.variance))
             putValueArgument(4, irBoolean(typeParameter.isReified))
         }
-        context.seenTypeParameters.remove(typeParameter)
+        seenTypeParameters.remove(typeParameter)
         return result
     }
 
@@ -152,27 +158,36 @@ internal class KTypeGenerator(
         }
     }
 
-    private fun IrBuilderWithScope.irKTypeList(types: List<IrType>, context: BuildingContext) =
-            irKTypeLikeList(types, symbols.kType.defaultType) { irKType(it, context) }
+    private fun IrBuilderWithScope.irKTypeList(
+            types: List<IrType>,
+            leaveReifiedForLater: Boolean,
+            seenTypeParameters: MutableSet<IrTypeParameter>
+    ) = irKTypeLikeList(types, symbols.kType.defaultType) { irKType(it, leaveReifiedForLater, seenTypeParameters) }
 
-    private fun IrBuilderWithScope.irKTypeProjectionsList(irTypeArguments: List<IrTypeArgument>, context: BuildingContext) =
-            irKTypeLikeList(irTypeArguments, symbols.kTypeProjection.typeWithoutArguments) {
-                irKTypeProjection(it, context)
-            }
+    private fun IrBuilderWithScope.irKTypeProjectionsList(
+            irTypeArguments: List<IrTypeArgument>,
+            leaveReifiedForLater: Boolean,
+            seenTypeParameters: MutableSet<IrTypeParameter>
+    ) = irKTypeLikeList(irTypeArguments, symbols.kTypeProjection.typeWithoutArguments) {
+        irKTypeProjection(it, leaveReifiedForLater, seenTypeParameters)
+    }
 
-    private fun IrBuilderWithScope.irKTypeProjection(argument: IrTypeArgument, context: BuildingContext) =
-            when (argument) {
-                is IrTypeProjection -> irCall(symbols.kTypeProjectionFactories.getValue(argument.variance)).apply {
-                    dispatchReceiver = irGetObject(symbols.kTypeProjectionCompanion)
-                    putValueArgument(0, irKType(argument.type, context))
-                }
+    private fun IrBuilderWithScope.irKTypeProjection(
+            argument: IrTypeArgument,
+            leaveReifiedForLater: Boolean,
+            seenTypeParameters: MutableSet<IrTypeParameter>
+    ) = when (argument) {
+        is IrTypeProjection -> irCall(symbols.kTypeProjectionFactories.getValue(argument.variance)).apply {
+            dispatchReceiver = irGetObject(symbols.kTypeProjectionCompanion)
+            putValueArgument(0, irKType(argument.type, leaveReifiedForLater, seenTypeParameters))
+        }
 
-                is IrStarProjection -> irCall(symbols.kTypeProjectionStar.owner.getter!!).apply {
-                    dispatchReceiver = irGetObject(symbols.kTypeProjectionCompanion)
-                }
+        is IrStarProjection -> irCall(symbols.kTypeProjectionStar.owner.getter!!).apply {
+            dispatchReceiver = irGetObject(symbols.kTypeProjectionCompanion)
+        }
 
-                else -> error("Unexpected IrTypeArgument: $argument (${argument::class})")
-            }
+        else -> error("Unexpected IrTypeArgument: $argument (${argument::class})")
+    }
 }
 
 internal fun IrBuilderWithScope.irKClass(context: KonanBackendContext, symbol: IrClassSymbol): IrExpression {
