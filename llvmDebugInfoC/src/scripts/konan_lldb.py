@@ -385,7 +385,9 @@ class KonanProxyTypeProvider:
         start = time.monotonic()
         log(lambda : "KonanProxyTypeProvider:{:#x}, name: {}".format(valobj.unsigned, valobj.name))
         if valobj.unsigned == 0:
+           log(lambda : "KonanProxyTypeProvider:{:#x}, name: {} NULL syntectic".format(valobj.unsigned, valobj.name))
            bench(start, lambda: "KonanProxyTypeProvider({:#x})".format(valobj.unsigned))
+           raise DebuggerException()
            self.proxy = KonanNullSyntheticProvider()
            return
 
